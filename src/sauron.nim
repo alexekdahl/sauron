@@ -1,9 +1,5 @@
-import os, times, strutils, json, posix, net, nativesockets, math, locks,
-    tables, sequtils
+import std/[os, strutils, times, json, posix, net, nativesockets, math, locks, tables, sequtils]
 
-# ------------------------------
-# Data Structures
-# ------------------------------
 type
   ProcessState = enum
     Running, Sleeping, DiskSleep, Stopped, Zombie, Dead, Unknown
@@ -14,20 +10,28 @@ type
     state: ProcessState
     parent_pid: int
     thread_count: int
-    memory_rss: int  # Resident Set Size (kB)
-    memory_vsz: int  # Virtual Memory Size (kB)
-    cpu_usage: float # Percentage (calculated like top does)
-    uptime: float    # Seconds
+    memory_rss: int 
+    memory_vsz: int 
+    cpu_usage: float
+    uptime: float  
     last_checked: string
 
   AppConfig = object
     check_interval: float
-    processes: seq[int]
+    processes: seq[string]
     log_path: string
     max_log_size: int
     max_log_files: int
 
-# ------------------------------
+const
+  ClockTicks = 100.0 # Default for most Linux systems
+
+var
+  serverSocket: Socket
+  logHandle: File
+  procDetails = initTable[int, ProcessDetails]()
+  configLock: Lock
+
 # JSON Conversion Helpers
 # ------------------------------
 proc `$`(ps: ProcessState): string =
@@ -61,21 +65,6 @@ proc `$`(t: Table[int, ProcessDetails]): string =
   "[" & items.join(", ") & "]"
 
 # ------------------------------
-# Global State
-# ------------------------------
-var
-  serverSocket: Socket
-  logHandle: File
-  procDetails = initTable[int, ProcessDetails]()
-  configLock: Lock
-
-# ------------------------------
-# Constants for ARM/Linux
-# ------------------------------
-const
-  ClockTicks = 100.0 # Default for most Linux systems
-
-# ------------------------------
 # /proc Parsing Utilities
 # ------------------------------
 proc parseState(state: char): ProcessState =
@@ -107,47 +96,69 @@ proc getProcessDetails(pid: int, checkInterval: float): ProcessDetails =
       thread_count: 0, memory_rss: 0, memory_vsz: 0,
       cpu_usage: 0.0, uptime: 0.0, last_checked: "")
   let statLine = readFile(statPath)
-  let start = statLine.find('(') + 1
-  let ends = statLine.find(')', start)
-  let name = statLine[start..<ends]
-  let rest = statLine[ends+2..^1].split(' ')
+  let startIdx = statLine.find('(') + 1
+  let endIdx = statLine.find(')', startIdx)
+  let procName = statLine[startIdx..<endIdx]
+  let rest = statLine[endIdx+2..^1].split(' ')
   let systemUptime = getSystemUptime()
   let startTime = rest[19].parseFloat / ClockTicks
   let processUptime = max(systemUptime - startTime, 0.0)
-  result = ProcessDetails(
+  var details = ProcessDetails(
     pid: pid,
-    name: name,
+    name: procName,
     state: parseState(rest[0][0]),
     parent_pid: rest[1].parseInt,
     thread_count: 0,
     memory_rss: 0,
     memory_vsz: 0,
-    cpu_usage: 0.0,  # will update below
+    cpu_usage: 0.0,
     uptime: roundTo(processUptime, 2),
     last_checked: ""
   )
   let statusPath = "/proc/" & $pid & "/status"
-  for line in lines(statusPath):
-    if line.startsWith("Threads:"):
-      result.thread_count = line[8..^1].strip.parseInt
-    elif line.startsWith("VmRSS:"):
-      result.memory_rss = line[6..^3].strip.parseInt  # in kB
-    elif line.startsWith("VmSize:"):
-      result.memory_vsz = line[7..^3].strip.parseInt  # in kB
+  if fileExists(statusPath):
+    for line in lines(statusPath):
+      if line.startsWith("Threads:"):
+        details.thread_count = line[8..^1].strip.parseInt
+      elif line.startsWith("VmRSS:"):
+        let rssStr = line[6..^1].strip.split()[0]
+        details.memory_rss = rssStr.parseInt
+      elif line.startsWith("VmSize:"):
+        let vszStr = line[7..^1].strip.split()[0]
+        details.memory_vsz = vszStr.parseInt
 
-  # Get cumulative CPU times (in ticks) from /proc/[pid]/stat:
   let utime = rest[11].parseFloat
   let stime = rest[12].parseFloat
   let total_time = utime + stime
 
-  # Calculate CPU usage like "top" does:
-  # CPU usage (%) = 100 * (total CPU seconds used) / (process uptime in seconds)
   if processUptime > 0:
-    result.cpu_usage = roundTo((total_time / ClockTicks) / processUptime * 100, 2)
+    details.cpu_usage = roundTo((total_time / ClockTicks) / processUptime * 100, 2)
   else:
-    result.cpu_usage = 0.0
+    details.cpu_usage = 0.0
 
-  return result
+  return details
+
+proc findPIDsByName(targetName: string): seq[int] =
+  var pids: seq[int] = @[]
+  for entry in walkDir("/proc"):
+    if entry.kind == pcDir:
+      let pidStr = extractFilename(entry.path)
+      try:
+        discard pidStr.parseInt
+      except ValueError:
+        continue
+
+      let pid = pidStr.parseInt
+      let statPath = "/proc/" & pidStr & "/stat"
+      if fileExists(statPath):
+        let statLine = readFile(statPath)
+        let startIdx = statLine.find('(') + 1
+        let endIdx = statLine.find(')', startIdx)
+        if startIdx > 0 and endIdx > startIdx:
+          let procName = statLine[startIdx..<endIdx]
+          if procName == targetName:
+            pids.add(pid)
+  return pids
 
 # ------------------------------
 # Logging System
@@ -155,17 +166,14 @@ proc getProcessDetails(pid: int, checkInterval: float): ProcessDetails =
 proc rotateLogs(config: AppConfig) =
   if logHandle != nil:
     close(logHandle)
-  # Delete oldest log if over limit
   let lastLog = config.log_path & $config.max_log_files
   if fileExists(lastLog):
     removeFile(lastLog)
-  # Rotate existing logs
   for i in countdown(config.max_log_files - 1, 1):
     let oldFile = config.log_path & $i
     let newFile = config.log_path & $(i+1)
     if fileExists(oldFile):
       moveFile(oldFile, newFile)
-  # Rotate current log
   if fileExists(config.log_path):
     moveFile(config.log_path, config.log_path & "1")
 
@@ -178,14 +186,13 @@ proc initLogging(config: AppConfig) =
 proc writeProcDetails(config: AppConfig) =
   let timestamp = now().utc.format("yyyy-MM-dd'T'HH:mm:ss'.'fffzzz")
   withLock configLock:
-    for pid in config.processes:
-      var details = procDetails.getOrDefault(pid, ProcessDetails(
-        pid: pid, name: "", state: Unknown, parent_pid: 0,
-        thread_count: 0, memory_rss: 0, memory_vsz: 0,
-        cpu_usage: 0.0, uptime: 0.0, last_checked: ""))
-      details.last_checked = timestamp
-      procDetails[pid] = details
-      writeLine(logHandle, $details)
+    # For each process name, find matching PIDs and update their details.
+    for procName in config.processes:
+      for pid in findPIDsByName(procName):
+        var details = getProcessDetails(pid, config.check_interval)
+        details.last_checked = timestamp
+        procDetails[pid] = details
+        writeLine(logHandle, $details)
   flushFile(logHandle)
   if getFileSize(config.log_path) > config.max_log_size:
     rotateLogs(config)
@@ -228,19 +235,17 @@ proc main() =
   let j = parseJson(configSource)
   config = AppConfig(
     check_interval: j["check_interval"].getFloat,
-    processes: j["processes"].getElems.mapIt(it.getInt),
-    log_path: j{"log_path"}.getStr("/var/log/watchdog.log"),
-    max_log_size: j{"max_log_size"}.getInt(1_048_576),
-    max_log_files: j{"max_log_files"}.getInt(5)
+    processes: j["processes"].getElems.mapIt(it.getStr),
+    log_path: j["log_path"].getStr("/var/log/watchdog.log"),
+    max_log_size: j["max_log_size"].getInt(1_048_576),
+    max_log_files: j["max_log_files"].getInt(5)
   )
   initLock(configLock)
   initLogging(config)
   initServer()
   while true:
     let startTime = epochTime()
-    withLock configLock:
-      for pid in config.processes:
-        procDetails[pid] = getProcessDetails(pid, config.check_interval)
+    # Update process details for all matching PIDs from process names.
     writeProcDetails(config)
     handleRequests(config)
     let elapsed = epochTime() - startTime
@@ -251,3 +256,4 @@ when isMainModule:
   main()
   deinitLock(configLock)
   if logHandle != nil: close(logHandle)
+
