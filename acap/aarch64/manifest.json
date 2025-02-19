@@ -1,0 +1,22 @@
+{
+	"schemaVersion": "1.7.0",
+	"acapPackageConf": {
+		"setup": {
+			"appName": "Sauron",
+			"appId": "42069",
+			"friendlyName": "Sauron",
+			"vendor": "alexekdahl",
+			"embeddedSdkVersion": "2.0",
+			"runMode": "respawn",
+			"version": "0.1.0",
+			"architecture": "aarch64"
+		}
+	},
+	"resources": {
+		"dbus": {
+			"conditionalMethods": [
+				"com.axis.HTTPConf1.VAPIXServiceAccounts1.*"
+			]
+		}
+	}
+}
