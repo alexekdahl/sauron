@@ -103,14 +103,14 @@ setup:
 
 # Install and start armv7 acap on remote device
 install-armv7-eap-remote ip user="root" pwd="pass": docker-build
-    sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "acapctl stop {{ acap_name }}"
+    @sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "acapctl stop {{ acap_name }}"
     sshpass -p {{ pwd }} scp -o StrictHostKeyChecking=no {{ eap_armv7 }} {{ user }}@{{ ip }}:/tmp/{{ acap_name }}
     sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "acapctl install /tmp/{{ acap_name }} && acapctl start {{ acap_name }}"
     sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "rm /tmp/{{ acap_name }}"
 
 # Install and start aarch64 acap on remote device
 install-aarch64-eap-remote ip user="root" pwd="pass": docker-build
-    sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "acapctl stop {{ acap_name }}"
+    @sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "acapctl stop {{ acap_name }}"
     sshpass -p {{ pwd }} scp -o StrictHostKeyChecking=no {{ eap_aarch64 }} {{ user }}@{{ ip }}:/tmp/{{ acap_name }}
     sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "acapctl install /tmp/{{ acap_name }} && acapctl start {{ acap_name }}"
     sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "rm /tmp/{{ acap_name }}"

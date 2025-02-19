@@ -4,16 +4,20 @@ type
   ProcessState = enum
     Running, Sleeping, DiskSleep, Stopped, Zombie, Dead, Unknown
 
+type
   ProcessDetails = object
     pid: int
-    name: string
-    state: ProcessState
-    parent_pid: int
-    thread_count: int
-    memory_rss: int 
-    memory_vsz: int 
+    name: string # Read from `/proc/<pid>/stat`
+    state: ProcessState # Parsed from the single-character code in `/proc/<pid>/stat`.
+    thread_count: int #  Read from `/proc/<pid>/status`.
+    memory_rss: int # Obtained from `VmRSS:` in `/proc/<pid>/status`
+      ## The Resident Set Size in kilobytes (kB). This is the non-swapped physical
+      ## memory the process has in RAM. 
+    memory_vsz: int # Obtained from `VmSize:` in `/proc/<pid>/status`.
+      ## The Virtual Memory Size in kilobytes (kB). This is the total virtual
+      ## memory allocated to the process, including all mapped files and libraries.
     cpu_usage: float
-    uptime: float  
+    uptime: float
     last_checked: string
 
   AppConfig = object
@@ -47,7 +51,6 @@ proc `$`(pd: ProcessDetails): string =
     "\"pid\": " & $pd.pid & ", " &
     "\"name\": \"" & pd.name & "\", " &
     "\"state\": \"" & $pd.state & "\", " &
-    "\"parent_pid\": " & $pd.parent_pid & ", " &
     "\"thread_count\": " & $pd.thread_count & ", " &
     "\"memory_rss_mb\": " & $(round(pd.memory_rss.float / 1024, 2)) & ", " &
     "\"memory_vsz_mb\": " & $(round(pd.memory_vsz.float / 1024, 2)) & ", " &
@@ -84,7 +87,7 @@ proc roundTo(num: float, precision: int): float =
 proc getProcessDetails(pid: int, checkInterval: float): ProcessDetails =
   let statPath = "/proc/" & $pid & "/stat"
   if not fileExists(statPath):
-    return ProcessDetails(pid: pid, name: "", state: Dead, parent_pid: 0,
+    return ProcessDetails(pid: pid, name: "", state: Dead,
       thread_count: 0, memory_rss: 0, memory_vsz: 0,
       cpu_usage: 0.0, uptime: 0.0, last_checked: "")
   let statLine = readFile(statPath)
@@ -99,7 +102,6 @@ proc getProcessDetails(pid: int, checkInterval: float): ProcessDetails =
     pid: pid,
     name: procName,
     state: parseState(rest[0][0]),
-    parent_pid: rest[1].parseInt,
     thread_count: 0,
     memory_rss: 0,
     memory_vsz: 0,
