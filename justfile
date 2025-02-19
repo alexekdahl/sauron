@@ -68,7 +68,7 @@ build-acap-aarch64:
 
 # Build aarch64 and armv7 via docker container
 docker-build: 
-    # @docker build -t builder .
+    @docker build -t builder .
     docker run -v "{{ justfile_directory() }}:/root/src" -w "/root/src" builder just build-acap
     @docker run -v "{{ justfile_directory() }}:/root/src" -w "/root/src" builder chown -R --reference=.gitignore ./build
 
@@ -102,7 +102,7 @@ setup:
     nimble install --depsOnly
 
 # Install and start armv7 acap on remote device
-install-armv7-eap-remote ip user="root" pwd="pass":
+install-armv7-eap-remote ip user="root" pwd="pass": docker-build
     # sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "acapctl stop {{ acap_name }}"
     sshpass -p {{ pwd }} scp -o StrictHostKeyChecking=no {{ eap_armv7 }} {{ user }}@{{ ip }}:/tmp/{{ acap_name }}
     sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "acapctl install /tmp/{{ acap_name }} && acapctl start {{ acap_name }}"
@@ -129,4 +129,3 @@ _capture-env path:
 _setup-build-dir path:
     @mkdir -p {{ path }}
     @rm -rf {{ path }}/*
-

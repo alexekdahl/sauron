@@ -2,9 +2,9 @@
 	"schemaVersion": "1.7.0",
 	"acapPackageConf": {
 		"setup": {
-			"appName": "Sauron",
+			"appName": "sauron",
 			"appId": "42069",
-			"friendlyName": "Sauron",
+			"friendlyName": "sauron",
 			"vendor": "alexekdahl",
 			"embeddedSdkVersion": "2.0",
 			"runMode": "respawn",

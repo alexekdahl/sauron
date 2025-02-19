@@ -198,7 +198,7 @@ proc handleRequests(config: AppConfig) =
 # ------------------------------
 proc main() =
   var config: AppConfig
-  let configSource = if paramCount() > 0: readFile(paramStr(1)) else: readAll(stdin)
+  let configSource = readFile("./localdata/config.json")
   let j = parseJson(configSource)
   config = AppConfig(
     check_interval: j["check_interval"].getFloat,

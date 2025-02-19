@@ -8,15 +8,19 @@ ENV NIMBLEPATH=/root/.nimble
 RUN apt-get update && \
     apt-get upgrade -yy && \
     apt-get install -yy \
-    build-essential \
-    git \
-    make \
-    curl \
-    gcc-10-aarch64-linux-gnu \
-    gcc-10-arm-linux-gnueabihf
+      build-essential \
+      git \
+      make \
+      curl \
+      gcc-10-aarch64-linux-gnu \
+      gcc-10-arm-linux-gnueabihf \
+      gcc-aarch64-linux-gnu \
+      binutils-aarch64-linux-gnu \
+      gcc-arm-linux-gnueabihf \
+      binutils-arm-linux-gnueabihf
+
 
 ADD docker/just /usr/local/bin
 ADD docker/install-nim.sh /root/
 
 RUN bash /root/install-nim.sh
-
