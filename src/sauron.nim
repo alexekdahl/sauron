@@ -1,11 +1,13 @@
 import os, times, strutils, json, posix, net, nativesockets, math, locks,
     tables, sequtils
+
 # ------------------------------
 # Data Structures
 # ------------------------------
 type
   ProcessState = enum
     Running, Sleeping, DiskSleep, Stopped, Zombie, Dead, Unknown
+
   ProcessDetails = object
     pid: int
     name: string
@@ -14,18 +16,20 @@ type
     thread_count: int
     memory_rss: int  # Resident Set Size (kB)
     memory_vsz: int  # Virtual Memory Size (kB)
-    cpu_usage: float # Percentage
+    cpu_usage: float # Percentage (calculated like top does)
     uptime: float    # Seconds
     last_checked: string
+
   AppConfig = object
     check_interval: float
     processes: seq[int]
     log_path: string
     max_log_size: int
     max_log_files: int
- # ------------------------------
- # JSON Conversion Helpers
- # ------------------------------
+
+# ------------------------------
+# JSON Conversion Helpers
+# ------------------------------
 proc `$`(ps: ProcessState): string =
   case ps
   of Running: "Running"
@@ -35,6 +39,7 @@ proc `$`(ps: ProcessState): string =
   of Zombie: "Zombie"
   of Dead: "Dead"
   of Unknown: "Unknown"
+
 proc `$`(pd: ProcessDetails): string =
   "{" &
     "\"pid\": " & $pd.pid & ", " &
@@ -42,17 +47,19 @@ proc `$`(pd: ProcessDetails): string =
     "\"state\": \"" & $pd.state & "\", " &
     "\"parent_pid\": " & $pd.parent_pid & ", " &
     "\"thread_count\": " & $pd.thread_count & ", " &
-    "\"memory_rss\": " & $pd.memory_rss & ", " &
-    "\"memory_vsz\": " & $pd.memory_vsz & ", " &
-    "\"cpu_usage\": " & $pd.cpu_usage & ", " &
-    "\"uptime\": " & $pd.uptime & ", " &
+    "\"memory_rss_mb\": " & $(round(pd.memory_rss.float / 1024, 2)) & ", " &
+    "\"memory_vsz_mb\": " & $(round(pd.memory_vsz.float / 1024, 2)) & ", " &
+    "\"cpu_usage_percent\": " & $pd.cpu_usage & ", " &
+    "\"uptime_sec\": " & $pd.uptime & ", " &
     "\"last_checked\": \"" & pd.last_checked & "\"" &
   "}"
+
 proc `$`(t: Table[int, ProcessDetails]): string =
   var items: seq[string] = @[]
   for _, v in t.pairs:
     items.add($v)
   "[" & items.join(", ") & "]"
+
 # ------------------------------
 # Global State
 # ------------------------------
@@ -61,14 +68,16 @@ var
   logHandle: File
   procDetails = initTable[int, ProcessDetails]()
   configLock: Lock
- # ------------------------------
- # Constants for ARM/Linux
- # ------------------------------
+
+# ------------------------------
+# Constants for ARM/Linux
+# ------------------------------
 const
   ClockTicks = 100.0 # Default for most Linux systems
-                     # ------------------------------
-                     # /proc Parsing Utilities
-                     # ------------------------------
+
+# ------------------------------
+# /proc Parsing Utilities
+# ------------------------------
 proc parseState(state: char): ProcessState =
   case state:
     of 'R': Running
@@ -78,6 +87,7 @@ proc parseState(state: char): ProcessState =
     of 'Z': Zombie
     of 'X': Dead
     else: Unknown
+
 proc getSystemUptime(): float =
   let uptimeFile = "/proc/uptime"
   if fileExists(uptimeFile):
@@ -85,9 +95,11 @@ proc getSystemUptime(): float =
     if contents.len >= 1:
       return parseFloat(contents[0])
   return epochTime() # Fallback to system time
+
 proc roundTo(num: float, precision: int): float =
   let factor = 10.0^precision.float
   (num * factor).round / factor
+
 proc getProcessDetails(pid: int, checkInterval: float): ProcessDetails =
   let statPath = "/proc/" & $pid & "/stat"
   if not fileExists(statPath):
@@ -110,7 +122,7 @@ proc getProcessDetails(pid: int, checkInterval: float): ProcessDetails =
     thread_count: 0,
     memory_rss: 0,
     memory_vsz: 0,
-    cpu_usage: 0.0,
+    cpu_usage: 0.0,  # will update below
     uptime: roundTo(processUptime, 2),
     last_checked: ""
   )
@@ -119,15 +131,24 @@ proc getProcessDetails(pid: int, checkInterval: float): ProcessDetails =
     if line.startsWith("Threads:"):
       result.thread_count = line[8..^1].strip.parseInt
     elif line.startsWith("VmRSS:"):
-      result.memory_rss = line[6..^3].strip.parseInt # Already in kB
+      result.memory_rss = line[6..^3].strip.parseInt  # in kB
     elif line.startsWith("VmSize:"):
-      result.memory_vsz = line[7..^3].strip.parseInt # Already in kB
-  let
-    utime = rest[11].parseFloat
-    stime = rest[12].parseFloat
-    total_time = utime + stime
-  result.cpu_usage = roundTo((total_time / ClockTicks / checkInterval * 100), 2)
+      result.memory_vsz = line[7..^3].strip.parseInt  # in kB
+
+  # Get cumulative CPU times (in ticks) from /proc/[pid]/stat:
+  let utime = rest[11].parseFloat
+  let stime = rest[12].parseFloat
+  let total_time = utime + stime
+
+  # Calculate CPU usage like "top" does:
+  # CPU usage (%) = 100 * (total CPU seconds used) / (process uptime in seconds)
+  if processUptime > 0:
+    result.cpu_usage = roundTo((total_time / ClockTicks) / processUptime * 100, 2)
+  else:
+    result.cpu_usage = 0.0
+
   return result
+
 # ------------------------------
 # Logging System
 # ------------------------------
@@ -147,11 +168,13 @@ proc rotateLogs(config: AppConfig) =
   # Rotate current log
   if fileExists(config.log_path):
     moveFile(config.log_path, config.log_path & "1")
+
 proc initLogging(config: AppConfig) =
   createDir(config.log_path.splitPath.head)
   if fileExists(config.log_path) and getFileSize(config.log_path) > 0:
     rotateLogs(config)
   logHandle = open(config.log_path, fmAppend)
+
 proc writeProcDetails(config: AppConfig) =
   let timestamp = now().utc.format("yyyy-MM-dd'T'HH:mm:ss'.'fffzzz")
   withLock configLock:
@@ -167,6 +190,7 @@ proc writeProcDetails(config: AppConfig) =
   if getFileSize(config.log_path) > config.max_log_size:
     rotateLogs(config)
     logHandle = open(config.log_path, fmAppend)
+
 # ------------------------------
 # HTTP Server
 # ------------------------------
@@ -176,12 +200,13 @@ proc initServer() =
   serverSocket.bindAddr(Port(43069))
   serverSocket.listen()
   serverSocket.getFd.setBlocking(false)
+
 proc handleRequests(config: AppConfig) =
   var readFds: TFdSet
   FD_ZERO(readFds)
   FD_SET(serverSocket.getFd.cint, readFds)
-  # var timeout = Timeval(tv_sec: 0, tv_usec: 100_000)
-  let res = select(serverSocket.getFd.cint + 1, addr readFds, nil, nil, nil)
+  var timeout = Timeval(tv_sec: posix.Time(0), tv_usec: 100_000)
+  let res = select(serverSocket.getFd.cint + 1, addr readFds, nil, nil, addr timeout)
   if res > 0:
     try:
       var client: Socket
@@ -193,6 +218,7 @@ proc handleRequests(config: AppConfig) =
       client.close()
     except:
       discard
+
 # ------------------------------
 # Main Application
 # ------------------------------
@@ -220,6 +246,7 @@ proc main() =
     let elapsed = epochTime() - startTime
     let sleepTime = max(config.check_interval - elapsed, 0.0) * 1000
     sleep(sleepTime.int)
+
 when isMainModule:
   main()
   deinitLock(configLock)
