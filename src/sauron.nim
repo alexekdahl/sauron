@@ -1,4 +1,4 @@
-import std/[os, strutils, times, json, posix, net, nativesockets, math, locks, tables, sequtils]
+import std/[os, strutils, times, json, posix, math, tables, sequtils]
 
 type
   ProcessState = enum
@@ -27,10 +27,8 @@ const
   ClockTicks = 100.0 # Default for most Linux systems
 
 var
-  serverSocket: Socket
   logHandle: File
   procDetails = initTable[int, ProcessDetails]()
-  configLock: Lock
 
 # JSON Conversion Helpers
 # ------------------------------
@@ -57,12 +55,6 @@ proc `$`(pd: ProcessDetails): string =
     "\"uptime_sec\": " & $pd.uptime & ", " &
     "\"last_checked\": \"" & pd.last_checked & "\"" &
   "}"
-
-proc `$`(t: Table[int, ProcessDetails]): string =
-  var items: seq[string] = @[]
-  for _, v in t.pairs:
-    items.add($v)
-  "[" & items.join(", ") & "]"
 
 # ------------------------------
 # /proc Parsing Utilities
@@ -185,46 +177,17 @@ proc initLogging(config: AppConfig) =
 
 proc writeProcDetails(config: AppConfig) =
   let timestamp = now().utc.format("yyyy-MM-dd'T'HH:mm:ss'.'fffzzz")
-  withLock configLock:
     # For each process name, find matching PIDs and update their details.
-    for procName in config.processes:
-      for pid in findPIDsByName(procName):
-        var details = getProcessDetails(pid, config.check_interval)
-        details.last_checked = timestamp
-        procDetails[pid] = details
-        writeLine(logHandle, $details)
+  for procName in config.processes:
+    for pid in findPIDsByName(procName):
+      var details = getProcessDetails(pid, config.check_interval)
+      details.last_checked = timestamp
+      procDetails[pid] = details
+      writeLine(logHandle, $details)
   flushFile(logHandle)
   if getFileSize(config.log_path) > config.max_log_size:
     rotateLogs(config)
     logHandle = open(config.log_path, fmAppend)
-
-# ------------------------------
-# HTTP Server
-# ------------------------------
-proc initServer() =
-  serverSocket = newSocket()
-  serverSocket.setSockOpt(OptReuseAddr, true)
-  serverSocket.bindAddr(Port(43069))
-  serverSocket.listen()
-  serverSocket.getFd.setBlocking(false)
-
-proc handleRequests(config: AppConfig) =
-  var readFds: TFdSet
-  FD_ZERO(readFds)
-  FD_SET(serverSocket.getFd.cint, readFds)
-  var timeout = Timeval(tv_sec: posix.Time(0), tv_usec: 100_000)
-  let res = select(serverSocket.getFd.cint + 1, addr readFds, nil, nil, addr timeout)
-  if res > 0:
-    try:
-      var client: Socket
-      serverSocket.accept(client)
-      let headers = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
-      withLock configLock:
-        let response = headers & $procDetails
-        client.send(response, flags = {SocketFlag.SafeDisconn})
-      client.close()
-    except:
-      discard
 
 # ------------------------------
 # Main Application
@@ -240,20 +203,16 @@ proc main() =
     max_log_size: j["max_log_size"].getInt(1_048_576),
     max_log_files: j["max_log_files"].getInt(5)
   )
-  initLock(configLock)
   initLogging(config)
-  initServer()
   while true:
     let startTime = epochTime()
     # Update process details for all matching PIDs from process names.
     writeProcDetails(config)
-    handleRequests(config)
     let elapsed = epochTime() - startTime
     let sleepTime = max(config.check_interval - elapsed, 0.0) * 1000
     sleep(sleepTime.int)
 
 when isMainModule:
   main()
-  deinitLock(configLock)
   if logHandle != nil: close(logHandle)
 
