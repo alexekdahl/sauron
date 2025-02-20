@@ -1,8 +1,8 @@
 # Package
 
-version       = "0.1.0"
+version       = "0.5.0"
 author        = "alexekdahl"
-description   = "A new awesome nimble package"
+description   = "Minimalistic process monitor"
 license       = "MIT"
 srcDir        = "src"
 bin           = @["sauron"]
