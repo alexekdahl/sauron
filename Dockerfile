@@ -10,14 +10,13 @@ RUN apt-get update && \
     apt-get install -yy \
       build-essential \
       git \
-      make \
       curl \
-      gcc-10-aarch64-linux-gnu \
-      gcc-10-arm-linux-gnueabihf \
-      gcc-aarch64-linux-gnu \
-      binutils-aarch64-linux-gnu \
       gcc-arm-linux-gnueabihf \
-      binutils-arm-linux-gnueabihf
+      gcc-aarch64-linux-gnu \
+      gcc-mipsel-linux-gnu  \
+      binutils-aarch64-linux-gnu \
+      binutils-arm-linux-gnueabihf \
+      binutils-mipsel-linux-gnu
 
 
 ADD docker/just /usr/local/bin
