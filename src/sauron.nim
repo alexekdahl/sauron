@@ -1,21 +1,16 @@
-import std/[os, strutils, times, json, posix, math, tables, sequtils]
+import os, strutils, times, posix, math, tables, sequtils
 
 type
   ProcessState = enum
     Running, Sleeping, DiskSleep, Stopped, Zombie, Dead, Unknown
 
-type
   ProcessDetails = object
     pid: int
     name: string      # Read from `/proc/<pid>/stat`
     state: ProcessState # Parsed from the single-character code in `/proc/<pid>/stat`.
-    thread_count: int #  Read from `/proc/<pid>/status`.
-    memory_rss: int   # Obtained from `VmRSS:` in `/proc/<pid>/status`
-      ## The Resident Set Size in kilobytes (kB). This is the non-swapped physical
-      ## memory the process has in RAM.
-    memory_vsz: int # Obtained from `VmSize:` in `/proc/<pid>/status`.
-      ## The Virtual Memory Size in kilobytes (kB). This is the total virtual
-      ## memory allocated to the process, including all mapped files and libraries.
+    thread_count: int   # Read from `/proc/<pid>/status`.
+    memory_rss: int     # The Resident Set Size in kB.
+    memory_vsz: int     # The Virtual Memory Size in kB.
     cpu_usage: float
     uptime: float
     last_checked: string
@@ -28,9 +23,9 @@ type
     max_log_files: int
 
 const
-  ClockTicks = 100.0 # Default for most Linux systems
-  LogPath = "./localdata/data.json"
-  ConfigPath = "./localdata/config.json"
+  ClockTicks = 100.0
+  LogPath = "./localdata/process.log"
+  ConfigPath = "./localdata/config.cfg"
 
 var
   logHandle: File
@@ -48,29 +43,48 @@ proc defaultConfig(): AppConfig =
     max_log_files: 5
   )
 
+proc writeDefaultConfig(path: string, cfg: AppConfig) =
+  var lines: seq[string] = @[]
+  lines.add("check_interval = " & $cfg.check_interval)
+  lines.add("processes = " & cfg.processes.join(","))
+  lines.add("log_path = " & cfg.log_path)
+  lines.add("max_log_size = " & $cfg.max_log_size)
+  lines.add("max_log_files = " & $cfg.max_log_files)
+  writeFile(path, lines.join("\n"))
+
 proc loadConfig(path: string): AppConfig =
   if fileExists(path):
-    let configSource = readFile(path)
-    try:
-      let cfg = parseJson(configSource)
-      return AppConfig(
-        check_interval: cfg["check_interval"].getFloat(default = 300.0),
-        processes: cfg["processes"].getElems().mapIt(it.getStr(
-            default = "sitecontroller_")),
-        log_path: cfg["log_path"].getStr(default = "./localdata/data.json"),
-        max_log_size: cfg["max_log_size"].getInt(default = 1_048_576),
-        max_log_files: cfg["max_log_files"].getInt(default = 5)
-      )
-
-    except:
-      raise newException(ValueError, "Invalid configuration file.")
-
-  let default = defaultConfig()
-  writeFile(path, pretty(%default))
-  return default
+    var cfg = defaultConfig()
+    for line in readFile(path).splitLines():
+      let trimmed = line.strip()
+      if trimmed.len == 0 or trimmed.startsWith("#"):
+        continue
+      let parts = trimmed.split("=", maxSplit = 1)
+      if parts.len == 2:
+        let key = parts[0].strip
+        let value = parts[1].strip
+        case key
+        of "check_interval":
+          cfg.check_interval = parseFloat(value)
+        of "processes":
+          # Assume comma-separated process names.
+          cfg.processes = value.split(",").mapIt(it.strip)
+        of "log_path":
+          cfg.log_path = value
+        of "max_log_size":
+          cfg.max_log_size = value.parseInt
+        of "max_log_files":
+          cfg.max_log_files = value.parseInt
+        else:
+          discard
+    return cfg
+  else:
+    let cfg = defaultConfig()
+    writeDefaultConfig(path, cfg)
+    return cfg
 
 # ------------------------------
-# JSON Conversion Helpers
+# Logging Helpers
 # ------------------------------
 proc `$`(ps: ProcessState): string =
   case ps
@@ -83,30 +97,28 @@ proc `$`(ps: ProcessState): string =
   of Unknown: "Unknown"
 
 proc `$`(pd: ProcessDetails): string =
-  "{" &
-    "\"pid\": " & $pd.pid & ", " &
-    "\"name\": \"" & pd.name & "\", " &
-    "\"state\": \"" & $pd.state & "\", " &
-    "\"thread_count\": " & $pd.thread_count & ", " &
-    "\"memory_rss_mb\": " & $(round(pd.memory_rss.float / 1024, 2)) & ", " &
-    "\"memory_vsz_mb\": " & $(round(pd.memory_vsz.float / 1024, 2)) & ", " &
-    "\"cpu_usage_percent\": " & $pd.cpu_usage & ", " &
-    "\"uptime_sec\": " & $pd.uptime & ", " &
-    "\"last_checked\": \"" & pd.last_checked & "\"" &
-  "}"
+  "PID: " & $pd.pid & 
+  " | Name: " & pd.name & 
+  " | State: " & $pd.state & 
+  " | Threads: " & $pd.thread_count & 
+  " | RSS (MB): " & $(round(pd.memory_rss.float / 1024, 2)) & 
+  " | VSZ (MB): " & $(round(pd.memory_vsz.float / 1024, 2)) & 
+  " | CPU (%): " & $pd.cpu_usage & 
+  " | Uptime (sec): " & $pd.uptime & 
+  " | Last Checked: " & pd.last_checked
 
 # ------------------------------
 # /proc Parsing Utilities
 # ------------------------------
 proc parseState(state: char): ProcessState =
-  case state:
-    of 'R': Running
-    of 'S': Sleeping
-    of 'D': DiskSleep
-    of 'T', 't': Stopped
-    of 'Z': Zombie
-    of 'X': Dead
-    else: Unknown
+  case state
+  of 'R': Running
+  of 'S': Sleeping
+  of 'D': DiskSleep
+  of 'T', 't': Stopped
+  of 'Z': Zombie
+  of 'X': Dead
+  else: Unknown
 
 proc getSystemUptime(): float =
   let uptimeFile = "/proc/uptime"
@@ -114,7 +126,7 @@ proc getSystemUptime(): float =
     let contents = readFile(uptimeFile).split()
     if contents.len >= 1:
       return parseFloat(contents[0])
-  return epochTime() # Fallback to system time
+  return epochTime()
 
 proc roundTo(num: float, precision: int): float =
   let factor = 10.0^precision.float
@@ -213,7 +225,6 @@ proc initLogging(config: AppConfig) =
 
 proc writeProcDetails(config: AppConfig) =
   let timestamp = now().utc.format("yyyy-MM-dd'T'HH:mm:ss'.'fffzzz")
-    # For each process name, find matching PIDs and update their details.
   for procName in config.processes:
     for pid in findPIDsByName(procName):
       var details = getProcessDetails(pid, config.check_interval)
@@ -233,7 +244,6 @@ when isMainModule:
   initLogging(config)
   while true:
     let startTime = epochTime()
-    # Update process details for all matching PIDs from process names.
     writeProcDetails(config)
     let elapsed = epochTime() - startTime
     let sleepTime = max(config.check_interval - elapsed, 0.0) * 1000
