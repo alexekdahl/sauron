@@ -18,6 +18,9 @@ eap_mipsle := build_dir_mipsle/acap_name +"_mipsle.eap"
 default:
     just --list
 
+release version: docker-build
+    gh release create {{ version }} --generate-notes {{ eap_aarch64 }} {{ eap_armv7 }} {{ eap_mipsle }}
+
 # Build for aarch64
 build-aarch64 *args:
     @just _setup-build-dir {{ build_dir_aarch64 }}
