@@ -7,12 +7,12 @@ type
 type
   ProcessDetails = object
     pid: int
-    name: string # Read from `/proc/<pid>/stat`
+    name: string      # Read from `/proc/<pid>/stat`
     state: ProcessState # Parsed from the single-character code in `/proc/<pid>/stat`.
     thread_count: int #  Read from `/proc/<pid>/status`.
-    memory_rss: int # Obtained from `VmRSS:` in `/proc/<pid>/status`
+    memory_rss: int   # Obtained from `VmRSS:` in `/proc/<pid>/status`
       ## The Resident Set Size in kilobytes (kB). This is the non-swapped physical
-      ## memory the process has in RAM. 
+      ## memory the process has in RAM.
     memory_vsz: int # Obtained from `VmSize:` in `/proc/<pid>/status`.
       ## The Virtual Memory Size in kilobytes (kB). This is the total virtual
       ## memory allocated to the process, including all mapped files and libraries.
@@ -29,11 +29,47 @@ type
 
 const
   ClockTicks = 100.0 # Default for most Linux systems
+  LogPath = "./localdata/data.json"
+  ConfigPath = "./localdata/config.json"
 
 var
   logHandle: File
   procDetails = initTable[int, ProcessDetails]()
 
+# ------------------------------
+# Config Utilities
+# ------------------------------
+proc defaultConfig(): AppConfig =
+  result = AppConfig(
+    check_interval: 300.0,
+    processes: @["sitecontroller_"],
+    log_path: LogPath,
+    max_log_size: 1_048_576,
+    max_log_files: 5
+  )
+
+proc loadConfig(path: string): AppConfig =
+  if fileExists(path):
+    let configSource = readFile(path)
+    try:
+      let cfg = parseJson(configSource)
+      return AppConfig(
+        check_interval: cfg["check_interval"].getFloat(default = 300.0),
+        processes: cfg["processes"].getElems().mapIt(it.getStr(
+            default = "sitecontroller_")),
+        log_path: cfg["log_path"].getStr(default = "./localdata/data.json"),
+        max_log_size: cfg["max_log_size"].getInt(default = 1_048_576),
+        max_log_files: cfg["max_log_files"].getInt(default = 5)
+      )
+
+    except:
+      raise newException(ValueError, "Invalid configuration file.")
+
+  let default = defaultConfig()
+  writeFile(path, pretty(%default))
+  return default
+
+# ------------------------------
 # JSON Conversion Helpers
 # ------------------------------
 proc `$`(ps: ProcessState): string =
@@ -173,8 +209,6 @@ proc rotateLogs(config: AppConfig) =
 
 proc initLogging(config: AppConfig) =
   createDir(config.log_path.splitPath.head)
-  if fileExists(config.log_path) and getFileSize(config.log_path) > 0:
-    rotateLogs(config)
   logHandle = open(config.log_path, fmAppend)
 
 proc writeProcDetails(config: AppConfig) =
@@ -194,17 +228,8 @@ proc writeProcDetails(config: AppConfig) =
 # ------------------------------
 # Main Application
 # ------------------------------
-proc main() =
-  var config: AppConfig
-  let configSource = readFile("./localdata/config.json")
-  let j = parseJson(configSource)
-  config = AppConfig(
-    check_interval: j["check_interval"].getFloat,
-    processes: j["processes"].getElems.mapIt(it.getStr),
-    log_path: j["log_path"].getStr("/var/log/watchdog.log"),
-    max_log_size: j["max_log_size"].getInt(1_048_576),
-    max_log_files: j["max_log_files"].getInt(5)
-  )
+when isMainModule:
+  var config = loadConfig(ConfigPath)
   initLogging(config)
   while true:
     let startTime = epochTime()
@@ -212,9 +237,4 @@ proc main() =
     writeProcDetails(config)
     let elapsed = epochTime() - startTime
     let sleepTime = max(config.check_interval - elapsed, 0.0) * 1000
-    sleep(sleepTime.int)
-
-when isMainModule:
-  main()
-  if logHandle != nil: close(logHandle)
-
+    sleep sleepTime.int

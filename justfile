@@ -49,22 +49,20 @@ build-acap-armv7:
     just build-armv7
     cp {{ build_dir_armv7 }}/{{ acap_name }} ./{{ acap_name }}
     cp acap/armv7/manifest.json ./manifest.json
-    cp acap/param.conf ./param.conf
     cp acap/LICENSE ./LICENSE
     cp acap/package.conf ./package.conf
-    @tar cvfz {{ eap_armv7 }} {{ acap_name }} manifest.json param.conf LICENSE package.conf
-    @rm {{ acap_name }} manifest.json param.conf LICENSE package.conf
+    @tar cvfz {{ eap_armv7 }} {{ acap_name }} manifest.json LICENSE package.conf
+    @rm {{ acap_name }} manifest.json LICENSE package.conf
 
 # Build aarch64 acap
 build-acap-aarch64: 
     just build-aarch64
     cp {{ build_dir_aarch64 }}/{{ acap_name }} ./{{ acap_name }}
     cp acap/aarch64/manifest.json ./manifest.json
-    cp acap/param.conf ./param.conf
     cp acap/LICENSE ./LICENSE
     cp acap/package.conf ./package.conf
-    @tar cvfz {{ eap_aarch64 }} {{ acap_name }} manifest.json param.conf LICENSE package.conf
-    @rm {{ acap_name }} manifest.json param.conf LICENSE package.conf
+    @tar cvfz {{ eap_aarch64 }} {{ acap_name }} manifest.json LICENSE package.conf
+    @rm {{ acap_name }} manifest.json LICENSE package.conf
 
 # Build aarch64 and armv7 via docker container
 docker-build: 
