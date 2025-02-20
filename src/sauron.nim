@@ -1,4 +1,4 @@
-import os, strutils, times, posix, math, tables, sequtils
+import os, strutils, times, posix, math, sequtils
 
 type
   ProcessState = enum
@@ -8,9 +8,9 @@ type
     pid: int
     name: string      # Read from `/proc/<pid>/stat`
     state: ProcessState # Parsed from the single-character code in `/proc/<pid>/stat`.
-    thread_count: int   # Read from `/proc/<pid>/status`.
-    memory_rss: int     # The Resident Set Size in kB.
-    memory_vsz: int     # The Virtual Memory Size in kB.
+    thread_count: int # Read from `/proc/<pid>/status`.
+    memory_rss: int   # Resident Set Size in kB.
+    memory_vsz: int   # Virtual Memory Size in kB.
     cpu_usage: float
     uptime: float
     last_checked: string
@@ -22,6 +22,8 @@ type
     max_log_size: int
     max_log_files: int
 
+  ProcessDetailsPair = tuple[pid: int, details: ProcessDetails]
+
 const
   ClockTicks = 100.0
   LogPath = "./localdata/process.log"
@@ -29,7 +31,7 @@ const
 
 var
   logHandle: File
-  procDetails = initTable[int, ProcessDetails]()
+  procDetails: seq[ProcessDetailsPair] = @[]
 
 # ------------------------------
 # Config Utilities
@@ -67,7 +69,6 @@ proc loadConfig(path: string): AppConfig =
         of "check_interval":
           cfg.check_interval = parseFloat(value)
         of "processes":
-          # Assume comma-separated process names.
           cfg.processes = value.split(",").mapIt(it.strip)
         of "log_path":
           cfg.log_path = value
@@ -97,14 +98,14 @@ proc `$`(ps: ProcessState): string =
   of Unknown: "Unknown"
 
 proc `$`(pd: ProcessDetails): string =
-  "PID: " & $pd.pid & 
-  " | Name: " & pd.name & 
-  " | State: " & $pd.state & 
-  " | Threads: " & $pd.thread_count & 
-  " | RSS (MB): " & $(round(pd.memory_rss.float / 1024, 2)) & 
-  " | VSZ (MB): " & $(round(pd.memory_vsz.float / 1024, 2)) & 
-  " | CPU (%): " & $pd.cpu_usage & 
-  " | Uptime (sec): " & $pd.uptime & 
+  "PID: " & $pd.pid &
+  " | Name: " & pd.name &
+  " | State: " & $pd.state &
+  " | Threads: " & $pd.thread_count &
+  " | RSS (MB): " & $(round(pd.memory_rss.float / 1024, 2)) &
+  " | VSZ (MB): " & $(round(pd.memory_vsz.float / 1024, 2)) &
+  " | CPU (%): " & $pd.cpu_usage &
+  " | Uptime (sec): " & $pd.uptime &
   " | Last Checked: " & pd.last_checked
 
 # ------------------------------
@@ -223,13 +224,23 @@ proc initLogging(config: AppConfig) =
   createDir(config.log_path.splitPath.head)
   logHandle = open(config.log_path, fmAppend)
 
+proc updateProcessDetails(pid: int, newDetails: ProcessDetails) =
+  var updated = false
+  for i, pair in procDetails:
+    if pair.pid == pid:
+      procDetails[i].details = newDetails
+      updated = true
+      break
+  if not updated:
+    procDetails.add((pid: pid, details: newDetails))
+
 proc writeProcDetails(config: AppConfig) =
   let timestamp = now().utc.format("yyyy-MM-dd'T'HH:mm:ss'.'fffzzz")
   for procName in config.processes:
     for pid in findPIDsByName(procName):
       var details = getProcessDetails(pid, config.check_interval)
       details.last_checked = timestamp
-      procDetails[pid] = details
+      updateProcessDetails(pid, details)
       writeLine(logHandle, $details)
   flushFile(logHandle)
   if getFileSize(config.log_path) > config.max_log_size:
