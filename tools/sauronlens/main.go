@@ -137,7 +137,7 @@ func printStats(stats map[string]ProcessStats) {
 		fmt.Printf("  Max CPU Usage: %.2f%% (At: %s)\n", stat.MaxCPU, stat.MaxCPUTime)
 		fmt.Printf("  Avg Memory Usage: %.2f MB\n", avgMemory)
 		fmt.Printf("  Min Memory Usage: %.2f MB\n", stat.MinMemory)
-		fmt.Printf("  Max Memory Usage: %.2f MB (At: %s)\n", stat.MaxMemory, stat.MaxMemoryTime)
+		fmt.Printf("  Max Memory Usage: %.2f MB (At: %s)\n\n", stat.MaxMemory, stat.MaxMemoryTime)
 	}
 }
 
