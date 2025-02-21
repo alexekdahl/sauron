@@ -15,9 +15,10 @@ eap_aarch64 := build_dir_aarch64/acap_name +"_aarch64.eap"
 eap_armv7 := build_dir_armv7/acap_name +"_armv7.eap"
 eap_mipsle := build_dir_mipsle/acap_name +"_mipsle.eap"
 
-default:
+_default:
     just --list
 
+# Release version on github
 release version: docker-build
     gh release create {{ version }} --generate-notes {{ eap_aarch64 }} {{ eap_armv7 }} {{ eap_mipsle }}
 
@@ -91,6 +92,7 @@ docker-build:
     docker run -v "{{ justfile_directory() }}:/root/src" -w "/root/src" builder just build-acap
     @docker run -v "{{ justfile_directory() }}:/root/src" -w "/root/src" builder chown -R --reference=.gitignore ./build
 
+# Build for debugging
 build-debug:
     nim c --mm:orc -d:useMalloc --threads:on --lineDir:on --debuginfo --debugger:native -d:MaxThreadPoolSize=4 {{ entry_point }} 
 
