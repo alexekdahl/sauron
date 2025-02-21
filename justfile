@@ -98,10 +98,9 @@ build-debug:
 format:
     find . -name '*.nim' -exec nimpretty {} +
 
-# Install dependencies
-setup:
-    nimble install --depsOnly
-
+# ---------------------------
+#      Remote deployment     
+# ---------------------------
 # Install and start armv7 acap on remote device
 install-armv7-eap-remote ip user="root" pwd="pass": docker-build
     @sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "acapctl stop {{ acap_name }}"
@@ -123,6 +122,17 @@ install-mipsle-eap-remote ip user="root" pwd="pass": docker-build
     sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "acapctl install /tmp/{{ acap_name }} && acapctl start {{ acap_name }}"
     sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "rm /tmp/{{ acap_name }}"
 
+# ---------------------------
+#      Analys log     
+# ---------------------------
+
+# Analyse log on remote device
+sauronlens ip user="root" pwd="pass": 
+    @sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "cat /usr/local/packages/{{ acap_name }}/localdata/process.log" | go run tools/sauronlens/main.go
+
+# ---------------------------
+#      Helper functions     
+# ---------------------------
 # Helper to capture environment
 _capture-env path:
     @gcc --version > {{ path }}/gcc_info.txt
