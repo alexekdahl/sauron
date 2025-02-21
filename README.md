@@ -27,7 +27,3 @@ max_log_size = 1048576
 max_log_files = 5
 ```
 
-## Final Words
-Sauron stands vigilant over your Axis camera—just like its namesake, the Dark Lord with his all-seeing eye. Whether you're ensuring your critical processes are running or just keeping a digital watch, Sauron has you covered.
-
-Happy monitoring!

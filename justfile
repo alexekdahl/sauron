@@ -123,11 +123,6 @@ install-mipsle-eap-remote ip user="root" pwd="pass": docker-build
     sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "acapctl install /tmp/{{ acap_name }} && acapctl start {{ acap_name }}"
     sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "rm /tmp/{{ acap_name }}"
 
-# Run test suite in container
-docker-test:
-    @docker build -t builder .
-    docker run -v "{{ justfile_directory() }}:/root/src" -w "/root/src" builder just test
-
 # Helper to capture environment
 _capture-env path:
     @gcc --version > {{ path }}/gcc_info.txt
