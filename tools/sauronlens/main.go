@@ -20,10 +20,12 @@ type ProcessStats struct {
 	Count         int
 	MaxMemoryTime string
 	MaxCPUTime    string
+	State         string
 }
 
 type LogEntry struct {
 	Name      string
+	State     string
 	CPU       float64
 	Memory    float64
 	Timestamp time.Time
@@ -42,6 +44,12 @@ func parseLogEntry(line string) (*LogEntry, error) {
 	}
 	name := nameParts[1]
 
+	stateParts := strings.Split(parts[2], ": ")
+	if len(stateParts) != 2 {
+		return nil, fmt.Errorf("invalid process state format")
+	}
+	state := stateParts[1]
+
 	cpuParts := strings.Split(parts[6], ": ")
 	if len(cpuParts) != 2 {
 		return nil, fmt.Errorf("invalid CPU usage format")
@@ -50,8 +58,6 @@ func parseLogEntry(line string) (*LogEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid CPU value: %v", err)
 	}
-
-	// Extract memory usage from "RSS (MB): ..." (parts[4])
 	memParts := strings.Split(parts[4], ": ")
 	if len(memParts) != 2 {
 		return nil, fmt.Errorf("invalid memory usage format")
@@ -69,6 +75,7 @@ func parseLogEntry(line string) (*LogEntry, error) {
 
 	return &LogEntry{
 		Name:      name,
+		State:     state,
 		CPU:       cpu,
 		Memory:    memory,
 		Timestamp: timestamp,
@@ -81,6 +88,7 @@ func updateStats(stats map[string]ProcessStats, entry *LogEntry) {
 	stat, exists := stats[entry.Name]
 	if !exists {
 		stat = ProcessStats{
+			State:     entry.State,
 			MinMemory: entry.Memory,
 			MaxMemory: entry.Memory,
 			MinCPU:    entry.CPU,
@@ -128,10 +136,12 @@ func processLogs(r io.Reader) (map[string]ProcessStats, error) {
 // printStats outputs the process statistics in a formatted way.
 func printStats(stats map[string]ProcessStats) {
 	for name, stat := range stats {
+		state := stat.State
 		avgCPU := stat.TotalCPU / float64(stat.Count)
 		avgMemory := stat.TotalMemory / float64(stat.Count)
 
 		fmt.Printf("Process %s:\n", name)
+		fmt.Printf("  State: %s\n", state)
 		fmt.Printf("  Avg CPU Usage: %.2f%%\n", avgCPU)
 		fmt.Printf("  Min CPU Usage: %.2f%%\n", stat.MinCPU)
 		fmt.Printf("  Max CPU Usage: %.2f%% (At: %s)\n", stat.MaxCPU, stat.MaxCPUTime)
