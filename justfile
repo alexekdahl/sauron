@@ -14,9 +14,6 @@ eap_aarch64 := build_dir_aarch64/acap_name +"_aarch64.eap"
 eap_armv7 := build_dir_armv7/acap_name +"_armv7.eap"
 eap_mipsle := build_dir_mipsle/acap_name +"_mipsle.eap"
 
-_default:
-    just --list
-
 # Release version on github
 release version: docker-build
     just _semver_check {{ version }}
@@ -27,12 +24,6 @@ build-aarch64 *args:
     @just _setup-build-dir {{ build_dir_aarch64 }}
     nim c --cpu:arm64 --os:linux {{ FLAGS }} --out:{{ build_dir_aarch64 }}/{{ acap_name }} {{ args }} {{ entry_point }}
     @just _capture-env {{ build_dir_aarch64 }}
-
-# Build for amd64
-build-amd64 *args:
-    @just _setup-build-dir {{ build_dir_amd64 }}
-    nim c --cpu:amd64 --os:linux {{ FLAGS }} --out:{{ build_dir_amd64 }}/{{ acap_name }} {{ args }} {{ entry_point }}
-    @just _capture-env {{ build_dir_amd64 }}
 
 # Build for armv7
 build-armv7 *args:
@@ -50,7 +41,6 @@ build-mipsle *args:
 build: 
    just build-aarch64
    just build-armv7
-   just build-amd64
    just build-mipsle
 
 # Build aarch64 and armv7 acap
@@ -86,15 +76,11 @@ build-acap-mipsle:
     @tar cvfz {{ eap_mipsle }} {{ acap_name }} manifest.json LICENSE package.conf
     @rm {{ acap_name }} manifest.json package.conf
 
-# Build aarch64 and armv7 via docker container
+# Build aarch64, mipsle and armv7 via docker container
 docker-build: 
     @docker build -t builder .
     docker run -v "{{ justfile_directory() }}:/root/src" -w "/root/src" builder just build-acap
     @docker run -v "{{ justfile_directory() }}:/root/src" -w "/root/src" builder chown -R --reference=.gitignore ./build
-
-# Build for debugging
-build-debug:
-    nim c --mm:orc -d:useMalloc --threads:on --lineDir:on --debuginfo --debugger:native -d:MaxThreadPoolSize=4 {{ entry_point }} 
 
 # Format according to nim standards
 format:
