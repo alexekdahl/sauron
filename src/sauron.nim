@@ -95,7 +95,6 @@ proc `$`(ps: ProcessState): string =
   of Unknown: "Unknown"
 
 proc `$`(pd: ProcessDetails): string =
-  result = "PID: "
   result.add("PID: ")
   result.add($pd.pid)
   result.add(" | Name: ")
