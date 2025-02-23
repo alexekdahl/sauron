@@ -22,8 +22,6 @@ type
     max_log_size: int
     max_log_files: int
 
-  ProcessDetailsPair = tuple[pid: int, details: ProcessDetails]
-
 const
   ClockTicks = 100.0
   LogPath = "./localdata/process.log"
@@ -31,7 +29,6 @@ const
 
 var
   logHandle: File
-  procDetails: seq[ProcessDetailsPair] = @[]
 
 # ------------------------------
 # Config Utilities
@@ -98,15 +95,25 @@ proc `$`(ps: ProcessState): string =
   of Unknown: "Unknown"
 
 proc `$`(pd: ProcessDetails): string =
-  "PID: " & $pd.pid &
-  " | Name: " & pd.name &
-  " | State: " & $pd.state &
-  " | Threads: " & $pd.thread_count &
-  " | RSS (MB): " & $(round(pd.memory_rss.float / 1024, 2)) &
-  " | VSZ (MB): " & $(round(pd.memory_vsz.float / 1024, 2)) &
-  " | CPU (%): " & $pd.cpu_usage &
-  " | Uptime (sec): " & $pd.uptime &
-  " | Last Checked: " & pd.last_checked
+  result = "PID: "
+  result.add("PID: ")
+  result.add($pd.pid)
+  result.add(" | Name: ")
+  result.add(pd.name)
+  result.add(" | State: ")
+  result.add($pd.state)
+  result.add(" | Threads: ")
+  result.add($pd.thread_count)
+  result.add(" | RSS (MB): ")
+  result.add($(round(pd.memory_rss.float / 1024, 2)))
+  result.add(" | VSZ (MB): ")
+  result.add($(round(pd.memory_vsz.float / 1024, 2)))
+  result.add(" | CPU (%): ")
+  result.add($pd.cpu_usage)
+  result.add(" | Uptime (sec): ")
+  result.add($pd.uptime)
+  result.add(" | Last Checked: ")
+  result.add(pd.last_checked)
 
 # ------------------------------
 # /proc Parsing Utilities
@@ -224,15 +231,6 @@ proc initLogging(config: AppConfig) =
   createDir(config.log_path.splitPath.head)
   logHandle = open(config.log_path, fmAppend)
 
-proc updateProcessDetails(pid: int, newDetails: ProcessDetails) =
-  var updated = false
-  for i, pair in procDetails:
-    if pair.pid == pid:
-      procDetails[i].details = newDetails
-      updated = true
-      break
-  if not updated:
-    procDetails.add((pid: pid, details: newDetails))
 
 proc writeProcDetails(config: AppConfig) =
   let timestamp = now().utc.format("yyyy-MM-dd'T'HH:mm:ss'.'fffzzz")
@@ -240,7 +238,6 @@ proc writeProcDetails(config: AppConfig) =
     for pid in findPIDsByName(procName):
       var details = getProcessDetails(pid, config.check_interval)
       details.last_checked = timestamp
-      updateProcessDetails(pid, details)
       writeLine(logHandle, $details)
   flushFile(logHandle)
   if getFileSize(config.log_path) > config.max_log_size:
