@@ -1,3 +1,4 @@
 build
 src/sauron
 *.log
+venv
