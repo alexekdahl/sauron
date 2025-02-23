@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
 )
 
@@ -147,22 +148,31 @@ func processLogs(r io.Reader) (map[string]ProcessStats, error) {
 
 // printStats outputs the process statistics in a formatted way.
 func printStats(stats map[string]ProcessStats) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	for name, stat := range stats {
 		avgCPU := stat.TotalCPU / float64(stat.Count)
 		avgMemory := stat.TotalMemory / float64(stat.Count)
 		latestTimeStr := stat.LatestTime.Format("2006-01-02 15:04:05")
 
-		fmt.Printf("Process %s:\n", name)
-		fmt.Printf("  State: %s\n", stat.State)
-		fmt.Printf("  Avg CPU Usage: %.2f%%\n", avgCPU)
-		fmt.Printf("  Min CPU Usage: %.2f%%\n", stat.MinCPU)
-		fmt.Printf("  Max CPU Usage: %.2f%% (At: %s)\n", stat.MaxCPU, stat.MaxCPUTime)
-		fmt.Printf("  Latest CPU Usage: %.2f%% (At: %s)\n", stat.LatestCPU, latestTimeStr)
-		fmt.Printf("  Avg Memory Usage: %.2f MB\n", avgMemory)
-		fmt.Printf("  Min Memory Usage: %.2f MB\n", stat.MinMemory)
-		fmt.Printf("  Max Memory Usage: %.2f MB (At: %s)\n", stat.MaxMemory, stat.MaxMemoryTime)
-		fmt.Printf("  Latest Memory Usage: %.2f MB (At: %s)\n\n", stat.LatestMemory, latestTimeStr)
+		// Fixed-width value strings for lines that include a parenthetical timestamp.
+		maxCPUVal := fmt.Sprintf("%-10s", fmt.Sprintf("%.2f%%", stat.MaxCPU))
+		latestCPUVal := fmt.Sprintf("%-10s", fmt.Sprintf("%.2f%%", stat.LatestCPU))
+		maxMemVal := fmt.Sprintf("%-10s", fmt.Sprintf("%.2f MB", stat.MaxMemory))
+		latestMemVal := fmt.Sprintf("%-10s", fmt.Sprintf("%.2f MB", stat.LatestMemory))
+
+		fmt.Fprintf(w, "Process %s:\n", name)
+		fmt.Fprintf(w, "  %-22s\t%s\n", "State:", stat.State)
+		fmt.Fprintf(w, "  %-22s\t%.2f%%\n", "Avg CPU Usage:", avgCPU)
+		fmt.Fprintf(w, "  %-22s\t%.2f%%\n", "Min CPU Usage:", stat.MinCPU)
+		fmt.Fprintf(w, "  %-22s\t%s (At: %s)\n", "Max CPU Usage:", maxCPUVal, stat.MaxCPUTime)
+		fmt.Fprintf(w, "  %-22s\t%s (At: %s)\n", "Latest CPU Usage:", latestCPUVal, latestTimeStr)
+		fmt.Fprintf(w, "  %-22s\t%.2f MB\n", "Avg Memory Usage:", avgMemory)
+		fmt.Fprintf(w, "  %-22s\t%.2f MB\n", "Min Memory Usage:", stat.MinMemory)
+		fmt.Fprintf(w, "  %-22s\t%s (At: %s)\n", "Max Memory Usage:", maxMemVal, stat.MaxMemoryTime)
+		fmt.Fprintf(w, "  %-22s\t%s (At: %s)\n", "Latest Memory Usage:", latestMemVal, latestTimeStr)
+		fmt.Fprintln(w)
 	}
+	w.Flush()
 }
 
 func min(a, b float64) float64 {
