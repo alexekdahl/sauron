@@ -20,6 +20,9 @@ type ProcessStats struct {
 	Count         int
 	MaxMemoryTime string
 	MaxCPUTime    string
+	LatestCPU     float64
+	LatestMemory  float64
+	LatestTime    time.Time
 	State         string
 }
 
@@ -88,11 +91,14 @@ func updateStats(stats map[string]ProcessStats, entry *LogEntry) {
 	stat, exists := stats[entry.Name]
 	if !exists {
 		stat = ProcessStats{
-			State:     entry.State,
-			MinMemory: entry.Memory,
-			MaxMemory: entry.Memory,
-			MinCPU:    entry.CPU,
-			MaxCPU:    entry.CPU,
+			State:        entry.State,
+			MinMemory:    entry.Memory,
+			MaxMemory:    entry.Memory,
+			MinCPU:       entry.CPU,
+			MaxCPU:       entry.CPU,
+			LatestCPU:    entry.CPU,
+			LatestMemory: entry.Memory,
+			LatestTime:   entry.Timestamp,
 		}
 	}
 
@@ -108,6 +114,12 @@ func updateStats(stats map[string]ProcessStats, entry *LogEntry) {
 	}
 	if stat.MaxCPU == entry.CPU {
 		stat.MaxCPUTime = tsStr
+	}
+
+	if stat.Count == 0 || entry.Timestamp.After(stat.LatestTime) {
+		stat.LatestCPU = entry.CPU
+		stat.LatestMemory = entry.Memory
+		stat.LatestTime = entry.Timestamp
 	}
 
 	stat.Count++
@@ -136,18 +148,20 @@ func processLogs(r io.Reader) (map[string]ProcessStats, error) {
 // printStats outputs the process statistics in a formatted way.
 func printStats(stats map[string]ProcessStats) {
 	for name, stat := range stats {
-		state := stat.State
 		avgCPU := stat.TotalCPU / float64(stat.Count)
 		avgMemory := stat.TotalMemory / float64(stat.Count)
+		latestTimeStr := stat.LatestTime.Format("2006-01-02 15:04:05")
 
 		fmt.Printf("Process %s:\n", name)
-		fmt.Printf("  State: %s\n", state)
+		fmt.Printf("  State: %s\n", stat.State)
 		fmt.Printf("  Avg CPU Usage: %.2f%%\n", avgCPU)
 		fmt.Printf("  Min CPU Usage: %.2f%%\n", stat.MinCPU)
 		fmt.Printf("  Max CPU Usage: %.2f%% (At: %s)\n", stat.MaxCPU, stat.MaxCPUTime)
+		fmt.Printf("  Latest CPU Usage: %.2f%% (At: %s)\n", stat.LatestCPU, latestTimeStr)
 		fmt.Printf("  Avg Memory Usage: %.2f MB\n", avgMemory)
 		fmt.Printf("  Min Memory Usage: %.2f MB\n", stat.MinMemory)
-		fmt.Printf("  Max Memory Usage: %.2f MB (At: %s)\n\n", stat.MaxMemory, stat.MaxMemoryTime)
+		fmt.Printf("  Max Memory Usage: %.2f MB (At: %s)\n", stat.MaxMemory, stat.MaxMemoryTime)
+		fmt.Printf("  Latest Memory Usage: %.2f MB (At: %s)\n\n", stat.LatestMemory, latestTimeStr)
 	}
 }
 
