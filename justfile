@@ -141,49 +141,31 @@ _setup-build-dir path:
 # Helper to validate semver version
 _semver_check version:
     #!/bin/bash
-
-    compare_versions() {
-        if [ "$1" = "$2" ]; then
-            return 1
-        else
-            return 0
-        fi
-    }
-
-    # Extract version components from package.conf
+    # Extract version from package.conf
     package_major=$(grep '^APPMAJORVERSION=' acap/package.conf | cut -d '=' -f2 | tr -d '"')
     package_minor=$(grep '^APPMINORVERSION=' acap/package.conf | cut -d '=' -f2 | tr -d '"')
     package_micro=$(grep '^APPMICROVERSION=' acap/package.conf | cut -d '=' -f2 | tr -d '"')
-    packageconf_version="${package_major}.${package_minor}.${package_micro}"
+    package_version="${package_major}.${package_minor}.${package_micro}"
 
-    # Get versions from the JSON files and Nimble file
+    # Extract versions from various sources
     aarch64_version=$(jq -r '.acapPackageConf.setup.version' acap/aarch64/manifest.json)
     armv7_version=$(jq -r '.acapPackageConf.setup.version' acap/armv7/manifest.json)
-    mipsle_version=$(jq -r '.acapPackageConf.setup.version' acap/mipsle/manifest.json)
     nimble_version=$(grep '^version' sauron.nimble | awk '{print $3}' | tr -d '"')
 
-    compare_versions {{version}} $aarch64_version
-    if [ $? -ne 1 ]; then
-        echo "Input version {{version}} is not the same as in aarch64 manifest ($aarch64_version)."
-        exit 1
-    fi
+    versions=(
+        "aarch64:$aarch64_version"
+        "armv7:$armv7_version"
+        "package.conf:$package_version"
+        "nimble:$nimble_version"
+    )
 
-    compare_versions {{version}} $armv7_version
-    if [ $? -ne 1 ]; then
-        echo "Input version {{version}} is not the same as in  armv7 manifest ($armv7_version)."
-        exit 1
-    fi
+    for entry in "${versions[@]}"; do
+        key="${entry%%:*}"
+        ver="${entry#*:}"
+        if [ {{ version }} != "$ver" ]; then
+            echo "Input version $version does not match $key version ($ver)."
+            exit 1
+        fi
+    done
 
-    compare_versions {{version}} $packageconf_version
-    if [ $? -ne 1 ]; then
-        echo "Input version {{version}} is not the same as in package.conf ($packageconf_version)."
-        exit 1
-    fi
-
-    compare_versions {{version}} $nimble_version
-    if [ $? -ne 1 ]; then
-        echo "Input version {{version}} is not the same as in nimble version ($nimble_version)."
-        exit 1
-    fi
-
-    echo "All versions are the same: {{version}}. Proceeding."
+    echo "All versions are the same: $version. Proceeding."
