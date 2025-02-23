@@ -167,7 +167,7 @@ _semver_check version:
     aarch64_version=$(jq -r '.acapPackageConf.setup.version' acap/aarch64/manifest.json)
     armv7_version=$(jq -r '.acapPackageConf.setup.version' acap/armv7/manifest.json)
     mipsle_version=$(jq -r '.acapPackageConf.setup.version' acap/mipsle/manifest.json)
-    nimble_version=$(grep '^version' acapupgrader.nimble | awk '{print $3}' | tr -d '"')
+    nimble_version=$(grep '^version' sauron.nimble | awk '{print $3}' | tr -d '"')
 
     compare_versions {{version}} $aarch64_version
     if [ $? -ne 1 ]; then
