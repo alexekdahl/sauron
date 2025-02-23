@@ -49,13 +49,13 @@ just sauronlens <ip> <username> <password>
 
 ```log
 Process <name>:
-  State: Sleeping (interruptible)
-  Avg CPU Usage: 0.01%
-  Min CPU Usage: 0.00%
-  Max CPU Usage: 6.28% (At: 2025-02-22 01:49:55)
-  Latest CPU Usage: 0.00% (At: 2025-02-23 11:10:01)
-  Avg Memory Usage: 4.56 MB
-  Min Memory Usage: 4.50 MB
-  Max Memory Usage: 5.88 MB (At: 2025-02-22 01:49:55)
-  Latest Memory Usage: 4.52 MB (At: 2025-02-23 11:10:01)
+  State:                  Sleeping (interruptible)
+  Avg CPU Usage:          0.01%
+  Min CPU Usage:          0.00%
+  Max CPU Usage:          6.28%      (At: 2025-02-22 01:49:55)
+  Latest CPU Usage:       4.55%      (At: 2025-02-23 11:54:36)
+  Avg Memory Usage:       4.56 MB
+  Min Memory Usage:       4.00 MB
+  Max Memory Usage:       5.88 MB    (At: 2025-02-22 01:49:55)
+  Latest Memory Usage:    4.00 MB    (At: 2025-02-23 11:54:36)
 ```
