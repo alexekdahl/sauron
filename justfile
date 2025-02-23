@@ -1,6 +1,5 @@
 # Common compiler flags for release builds
-FLAGS := "--mm:arc --panics:on -d:useMalloc --threads:off -d:release --opt:size --passL:'-Wl,-Bdynamic' --passL:-flto --passC:-flto -d:strip --outdir:build"
-
+FLAGS := "--mm:arc --threads:off --panics:off -d:release --opt:size -d:danger --deadCodeElim:on --stackTrace:off -d:strip --passC:-flto --passL:-flto --passC:-ffunction-sections --passC:-fdata-sections --passL:-Wl,--gc-sections --outdir:build"
 
 acap_name := "sauron"
 build_dir := "build"
