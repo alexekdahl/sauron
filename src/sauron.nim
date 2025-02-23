@@ -95,24 +95,15 @@ proc `$`(ps: ProcessState): string =
   of Unknown: "Unknown"
 
 proc `$`(pd: ProcessDetails): string =
-  result.add("PID: ")
-  result.add($pd.pid)
-  result.add(" | Name: ")
-  result.add(pd.name)
-  result.add(" | State: ")
-  result.add($pd.state)
-  result.add(" | Threads: ")
-  result.add($pd.thread_count)
-  result.add(" | RSS (MB): ")
-  result.add($(round(pd.memory_rss.float / 1024, 2)))
-  result.add(" | VSZ (MB): ")
-  result.add($(round(pd.memory_vsz.float / 1024, 2)))
-  result.add(" | CPU (%): ")
-  result.add($pd.cpu_usage)
-  result.add(" | Uptime (sec): ")
-  result.add($pd.uptime)
-  result.add(" | Last Checked: ")
-  result.add(pd.last_checked)
+  "PID: " & $pd.pid &
+  " | Name: " & pd.name &
+  " | State: " & $pd.state &
+  " | Threads: " & $pd.thread_count &
+  " | RSS (MB): " & $(round(pd.memory_rss.float / 1024, 2)) &
+  " | VSZ (MB): " & $(round(pd.memory_vsz.float / 1024, 2)) &
+  " | CPU (%): " & $pd.cpu_usage &
+  " | Uptime (sec): " & $pd.uptime &
+  " | Last Checked: " & pd.last_checked
 
 # ------------------------------
 # /proc Parsing Utilities
