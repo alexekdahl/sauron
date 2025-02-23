@@ -85,7 +85,7 @@ fig_cpu = px.line(
     title="CPU Usage Over Time by Process",
 )
 fig_cpu.update_layout(xaxis_title="Timestamp", yaxis_title="CPU (%)")
-fig_cpu.show()
+fig_cpu.write_html("cpu_usage.html")
 
 fig_rss = px.line(
     df,
@@ -96,4 +96,4 @@ fig_rss = px.line(
     title="RSS Memory (MB) Over Time by Process",
 )
 fig_rss.update_layout(xaxis_title="Timestamp", yaxis_title="RSS (MB)")
-fig_rss.show()
+fig_rss.write_html("rss_usage.html")

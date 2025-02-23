@@ -118,6 +118,13 @@ install-mipsle-eap-remote ip user="root" pwd="pass": docker-build
 sauronlens ip user="root" pwd="pass": 
     @sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "cat /usr/local/packages/{{ acap_name }}/localdata/process.log" | go run tools/sauronlens/main.go
 
+# Analyse log on remote device
+plot ip user="root" pwd="pass":
+    @docker build -f tools/plot/Dockerfile -t plotter:latest .
+    @sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "cat /usr/local/packages/{{ acap_name }}/localdata/process.log" | docker run --rm -i -v {{ justfile_directory() }}/tools/plot:/app plotter:latest
+    @open tools/plot/rss_usage.html
+    @open tools/plot/cpu_usage.html
+
 # ---------------------------
 #      Helper functions     
 # ---------------------------
