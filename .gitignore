@@ -3,4 +3,5 @@ src/sauron
 *.log
 venv
 rss_usage.html
+pss_usage.html
 cpu_usage.html

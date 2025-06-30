@@ -6,17 +6,10 @@
 			"appId": "42069",
 			"friendlyName": "sauron",
 			"vendor": "alexekdahl",
-			"embeddedSdkVersion": "2.0",
+			"embeddedSdkVersion": "3.0",
 			"runMode": "respawn",
 			"version": "0.6.9",
 			"architecture": "armv7hf"
 		}
 	},
-	"resources": {
-		"dbus": {
-			"conditionalMethods": [
-				"com.axis.HTTPConf1.VAPIXServiceAccounts1.*"
-			]
-		}
-	}
 }

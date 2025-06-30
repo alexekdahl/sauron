@@ -11,7 +11,7 @@ def parse_log_line(line, pattern):
     """
     match = re.match(pattern, line)
     if match:
-        pid, name, state, threads, rss, vsz, cpu, uptime, last_checked = match.groups()
+        pid, name, state, threads, rss, vsz, pss, cpu, uptime, last_checked = match.groups()
         return {
             "PID": int(pid),
             "Name": name,
@@ -19,6 +19,7 @@ def parse_log_line(line, pattern):
             "Threads": int(threads),
             "RSS_MB": float(rss),
             "VSZ_MB": float(vsz),
+            "PSS_MB": float(pss),
             "CPU_percent": float(cpu),
             "Uptime_sec": float(uptime),
             "Last_Checked": pd.to_datetime(last_checked),
@@ -70,8 +71,9 @@ def process_logs(log_source, pattern):
 
 def generate_plots(df):
     """
-    Generate and save the CPU usage and RSS memory usage plots as HTML files.
+    Generate and save the CPU usage, RSS memory, and PSS memory plots as HTML files.
     """
+    # CPU Usage
     fig_cpu = px.line(
         df,
         x="Last_Checked",
@@ -83,16 +85,29 @@ def generate_plots(df):
     fig_cpu.update_layout(xaxis_title="Timestamp", yaxis_title="CPU (%)")
     fig_cpu.write_html("cpu_usage.html")
 
+    # RSS Memory
     fig_rss = px.line(
         df,
         x="Last_Checked",
         y="RSS_MB",
         color="Name",
         markers=True,
-        title="Memory (MB) Over Time by Process",
+        title="RSS Memory (MB) Over Time by Process",
     )
-    fig_rss.update_layout(xaxis_title="Timestamp", yaxis_title="MEM (MB)")
+    fig_rss.update_layout(xaxis_title="Timestamp", yaxis_title="RSS (MB)")
     fig_rss.write_html("rss_usage.html")
+
+    # PSS Memory
+    fig_pss = px.line(
+        df,
+        x="Last_Checked",
+        y="PSS_MB",
+        color="Name",
+        markers=True,
+        title="PSS Memory (MB) Over Time by Process",
+    )
+    fig_pss.update_layout(xaxis_title="Timestamp", yaxis_title="PSS (MB)")
+    fig_pss.write_html("pss_usage.html")
 
 
 def main():
@@ -103,9 +118,10 @@ def main():
         r"Threads:\s*(\d+)\s*\|\s*"
         r"RSS \(MB\):\s*([\d\.]+)\s*\|\s*"
         r"VSZ \(MB\):\s*([\d\.]+)\s*\|\s*"
+        r"PSS \(MB\):\s*([\d\.]+)\s*\|\s*"
         r"CPU \(%\):\s*([\d\.]+)\s*\|\s*"
         r"Uptime \(sec\):\s*([\d\.]+)\s*\|\s*"
-        r"Last Checked:\s*([\d\-\:T\.Z]+)"
+        r"Last Checked:\s*([^\|]+)"
     )
 
     log_source, should_close = read_log_source()

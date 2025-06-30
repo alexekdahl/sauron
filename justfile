@@ -1,5 +1,5 @@
 # Common compiler flags for release builds
-FLAGS := "--mm:arc --threads:off --panics:off -d:release --opt:size -d:danger --deadCodeElim:on --stackTrace:off -d:strip --passC:-flto --passL:-flto --passC:-ffunction-sections --passC:-fdata-sections --passL:-Wl,--gc-sections --outdir:build"
+FLAGS := "--mm:arc --threads:off --panics:off -d:release --opt:size -d:danger --stackTrace:off -d:strip --passC:-flto --passL:-flto --passC:-ffunction-sections --passC:-fdata-sections --passL:-Wl,--gc-sections --outdir:build"
 
 acap_name := "sauron"
 build_dir := "build"
@@ -116,14 +116,15 @@ install-mipsle-eap-remote ip user="root" pwd="pass": docker-build
 
 # Analyse log on remote device
 sauronlens ip user="root" pwd="pass": 
-    @sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "cat /usr/local/packages/{{ acap_name }}/localdata/process.log" | go run tools/sauronlens/main.go
+    @sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "cat /usr/local/packages/{{ acap_name }}/localdata/process.*" | go run tools/sauronlens/main.go
 
 # Analyse log on remote device
 plot ip user="root" pwd="pass":
     @docker build -f tools/plot/Dockerfile -t plotter:latest .
-    @sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "cat /usr/local/packages/{{ acap_name }}/localdata/process.log" | docker run --rm -i -v {{ justfile_directory() }}/tools/plot:/app plotter:latest
+    @sshpass -p {{ pwd }} ssh -o StrictHostKeyChecking=no {{ user }}@{{ ip }} "cat /usr/local/packages/{{ acap_name }}/localdata/process.*" | docker run --rm -i -v {{ justfile_directory() }}/tools/plot:/app plotter:latest
     @open tools/plot/rss_usage.html
     @open tools/plot/cpu_usage.html
+    @open tools/plot/pss_usage.html
 
 # ---------------------------
 #      Helper functions     
