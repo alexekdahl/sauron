@@ -11,6 +11,7 @@ RUN apt-get update && \
       build-essential \
       git \
       curl \
+      upx \
       gcc-arm-linux-gnueabihf \
       gcc-aarch64-linux-gnu \
       gcc-mipsel-linux-gnu  \

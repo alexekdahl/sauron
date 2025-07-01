@@ -24,6 +24,7 @@ build-aarch64 *args:
     @just _setup-build-dir {{ build_dir_aarch64 }}
     nim c --cpu:arm64 --os:linux {{ FLAGS }} --out:{{ build_dir_aarch64 }}/{{ acap_name }} {{ args }} {{ entry_point }}
     @just _capture-env {{ build_dir_aarch64 }}
+    upx --ultra-brute --lzma {{ build_dir_aarch64 }}/{{ acap_name }}
 
 # Build for armv7
 build-armv7 *args:
@@ -36,6 +37,7 @@ build-mipsle *args:
     @just _setup-build-dir {{ build_dir_mipsle }}
     nim c --cpu:mipsel --os:linux  {{ FLAGS }} --out:{{ build_dir_mipsle }}/{{ acap_name }} {{ args }} {{ entry_point }}
     @just _capture-env {{ build_dir_mipsle }}
+    upx --ultra-brute --lzma {{ build_dir_mipsle }}/{{ acap_name }}
 
 # Build binary for all archs
 build: 
