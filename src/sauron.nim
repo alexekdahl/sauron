@@ -1,267 +1,312 @@
-import os, strutils, times, posix, math, sequtils
+import os, strutils, times, posix, math
 
-type
-  ProcessState = enum
-    Running, Sleeping, DiskSleep, Stopped, Zombie, Dead, Unknown
-
-  ProcessDetails = object
-    pid: int
-    name: string           # From `/proc/<pid>/stat`
-    state: ProcessState    # Parsed from stat code
-    thread_count: int      # From `/proc/<pid>/status`
-    memory_rss: int        # Resident Set Size in kB
-    memory_vsz: int        # Virtual Memory Size in kB
-    memory_pss: int        # Proportional Set Size in kB
-    cpu_usage: float       # Percentage
-    uptime: float          # Seconds
-    last_checked: string   # ISO timestamp
-
-  AppConfig = object
-    check_interval: float
-    processes: seq[string]
-    log_path: string
-    max_log_size: int
-    max_log_files: int
+# ==============================================================================
+# Minimal types and constants
+# ==============================================================================
 
 const
   ClockTicks = 100.0
   LogPath = "./localdata/process.log"
   ConfigPath = "./localdata/config.cfg"
+  BufferSize = 512
 
 var
   logHandle: File
+  buffer: array[BufferSize, char] # Stack-allocated buffer
 
-# ------------------------------
-# Config Utilities
-# ------------------------------
+# ==============================================================================
+# Minimal utilities - no allocations
+# ==============================================================================
 
-proc defaultConfig(): AppConfig =
-  result = AppConfig(
-    check_interval: 300.0,
-    processes: @["sitecontroller_"],
-    log_path: LogPath,
-    max_log_size: 1_048_576,
-    max_log_files: 5
-  )
-
-proc writeDefaultConfig(path: string, cfg: AppConfig) =
-  var lines: seq[string] = @[]
-  lines.add("check_interval = " & $cfg.check_interval)
-  lines.add("processes = " & cfg.processes.join(","))
-  lines.add("log_path = " & cfg.log_path)
-  lines.add("max_log_size = " & $cfg.max_log_size)
-  lines.add("max_log_files = " & $cfg.max_log_files)
-  writeFile(path, lines.join("\n"))
-
-proc loadConfig(path: string): AppConfig =
-  if fileExists(path):
-    var cfg = defaultConfig()
-    for line in readFile(path).splitLines():
-      let trimmed = line.strip()
-      if trimmed.len == 0 or trimmed.startsWith("#"): continue
-      let parts = trimmed.split("=", maxSplit = 1)
-      if parts.len == 2:
-        let key = parts[0].strip
-        let value = parts[1].strip
-        case key
-        of "check_interval": cfg.check_interval = parseFloat(value)
-        of "processes": cfg.processes = value.split(",").mapIt(it.strip)
-        of "log_path": cfg.log_path = value
-        of "max_log_size": cfg.max_log_size = value.parseInt
-        of "max_log_files": cfg.max_log_files = value.parseInt
-        else: discard
-    return cfg
-  else:
-    let cfg = defaultConfig()
-    writeDefaultConfig(path, cfg)
-    return cfg
-
-# ------------------------------
-# Logging Helpers
-# ------------------------------
-
-proc `$`(ps: ProcessState): string =
-  case ps
-  of Running: "Running"
-  of Sleeping: "Sleeping (interruptible)"
-  of DiskSleep: "Sleeping (uninterruptible)"
-  of Stopped: "Stopped"
-  of Zombie: "Zombie"
-  of Dead: "Dead"
+proc parseState(c: char): string =
+  case c
+  of 'R': "Running"
+  of 'S': "Sleeping (interruptible)"
+  of 'D': "Sleeping (uninterruptible)"
+  of 'T', 't': "Stopped"
+  of 'Z': "Zombie"
+  of 'X': "Dead"
   else: "Unknown"
 
-proc roundTo(num: float, precision: int): float =
-  let factor = 10.0^precision.float
-  (num * factor).round / factor
+proc writeFloat(f: File, val: float, precision: int) =
+  ## Write float with precision without allocation
+  let factor = pow(10.0, precision.float)
+  let rounded = round(val * factor) / factor
+  f.write($rounded)
 
-proc `$`(pd: ProcessDetails): string =
-  "PID: " & $pd.pid &
-  " | Name: " & pd.name &
-  " | State: " & $pd.state &
-  " | Threads: " & $pd.thread_count &
-  " | RSS (MB): " & $(roundTo(pd.memory_rss.float / 1000.0, 2)) &
-  " | VSZ (MB): " & $(roundTo(pd.memory_vsz.float / 1000.0, 2)) &
-  " | PSS (MB): " & $(roundTo(pd.memory_pss.float / 1000.0, 2)) &
-  " | CPU (%): " & $pd.cpu_usage &
-  " | Uptime (sec): " & $pd.uptime &
-  " | Last Checked: " & pd.last_checked
+proc parseIntFromBuffer(buf: openarray[char], start, stop: int): int =
+  ## Parse int from buffer slice without creating string
+  result = 0
+  var i = start
+  while i < stop and buf[i] in {' ', '\t'}: inc i # Skip whitespace
+  while i < stop and buf[i] in '0'..'9':
+    result = result * 10 + (ord(buf[i]) - ord('0'))
+    inc i
 
-# ------------------------------
-# /proc Parsing Utilities
-# ------------------------------
+proc parseFloatFromBuffer(buf: openarray[char], start, stop: int): float =
+  ## Simple float parser from buffer
+  result = 0.0
+  var i = start
+  var decimal = false
+  var decimalPlace = 0.1
 
-proc parseState(state: char): ProcessState =
-  case state
-  of 'R': Running
-  of 'S': Sleeping
-  of 'D': DiskSleep
-  of 'T', 't': Stopped
-  of 'Z': Zombie
-  of 'X': Dead
-  else: Unknown
-
-proc getSystemUptime(): float =
-  let uptimeFile = "/proc/uptime"
-  if fileExists(uptimeFile):
-    let contents = readFile(uptimeFile).split()
-    if contents.len >= 1: return parseFloat(contents[0])
-  return epochTime()
-
-# Safe file read returning empty string on missing process
-proc safeRead(path: string): string =
-  try:
-    return readFile(path)
-  except IOError:
-    return ""
-
-proc getProcessDetails(pid: int, checkInterval: float): ProcessDetails =
-  # Initialize default details for missing processes
-  var details = ProcessDetails(
-    pid: pid,
-    name: "",
-    state: Dead,
-    thread_count: 0,
-    memory_rss: 0,
-    memory_vsz: 0,
-    memory_pss: 0,
-    cpu_usage: 0.0,
-    uptime: 0.0,
-    last_checked: ""
-  )
-  let statPath = "/proc/" & $pid & "/stat"
-  let statLine = safeRead(statPath)
-  if statLine.len == 0:
-    return details
-
-  # Parse /proc/<pid>/stat
-  let startIdx = statLine.find('(') + 1
-  let endIdx = statLine.find(')', startIdx)
-  if startIdx <= 0 or endIdx <= startIdx:
-    return details
-  let procName = statLine[startIdx..<endIdx]
-  let rest = statLine[endIdx+2..^1].split(' ')
-
-  # Compute uptime
-  let systemUptime = getSystemUptime()
-  let startTime = rest[19].parseFloat / ClockTicks
-  let processUptime = max(systemUptime - startTime, 0.0)
-
-  # Assign base details
-  details.name = procName
-  details.state = parseState(rest[0][0])
-  details.uptime = roundTo(processUptime, 2)
-
-  # Read /proc/<pid>/status
-  let statusPath = "/proc/" & $pid & "/status"
-  for line in safeRead(statusPath).splitLines():
-    if line.startsWith("Threads:"):
-      details.thread_count = line[8..^1].strip.parseInt
-    elif line.startsWith("VmRSS:"):
-      details.memory_rss = line[6..^1].strip.split()[0].parseInt
-    elif line.startsWith("VmSize:"):
-      details.memory_vsz = line[7..^1].strip.split()[0].parseInt
-
-  # Read PSS from smaps_rollup or fallback to smaps
-  let smapsRoll = "/proc/" & $pid & "/smaps_rollup"
-  var pssTotal = 0
-  var foundPss = false
-  for line in safeRead(smapsRoll).splitLines():
-    if line.startsWith("Pss:"):
-      pssTotal = line[4..^1].strip.split()[0].parseInt
-      foundPss = true
+  while i < stop and buf[i] in {' ', '\t'}: inc i
+  while i < stop:
+    if buf[i] in '0'..'9':
+      if decimal:
+        result += float(ord(buf[i]) - ord('0')) * decimalPlace
+        decimalPlace *= 0.1
+      else:
+        result = result * 10.0 + float(ord(buf[i]) - ord('0'))
+    elif buf[i] == '.':
+      decimal = true
+    else:
       break
-  if not foundPss:
-    let smapsFile = "/proc/" & $pid & "/smaps"
-    for line in safeRead(smapsFile).splitLines():
+    inc i
+
+# ==============================================================================
+# Direct streaming process logger
+# ==============================================================================
+
+proc logProcess(pid: int, name: string, checkInterval: float) =
+  ## Stream process info directly to log with minimal memory
+  let pidStr = $pid
+
+  # Start log line
+  logHandle.write("PID: ")
+  logHandle.write(pidStr)
+  logHandle.write(" | Name: ")
+  logHandle.write(name)
+
+  var
+    state = 'X'
+    threads = 0
+    rss = 0
+    vsz = 0
+    pss = 0
+    utime = 0.0
+    stime = 0.0
+    starttime = 0.0
+
+  # Read stat file
+  var statFile: File
+  if open(statFile, "/proc/" & pidStr & "/stat", fmRead):
+    var bytesRead = statFile.readChars(buffer, 0, BufferSize-1)
+    if bytesRead > 0:
+      buffer[bytesRead] = '\0'
+
+      # Find end of command name
+      var i = 0
+      while i < bytesRead and buffer[i] != '(': inc i
+      while i < bytesRead and buffer[i] != ')': inc i
+      if i < bytesRead - 2:
+        inc i, 2 # Skip ") "
+        state = buffer[i]
+
+        # Parse fields - count spaces
+        var fieldStart = i + 2
+        var fieldNum = 0
+        for j in fieldStart..<bytesRead:
+          if buffer[j] == ' ':
+            case fieldNum
+            of 11: utime = parseFloatFromBuffer(buffer, fieldStart, j)
+            of 12: stime = parseFloatFromBuffer(buffer, fieldStart, j)
+            of 19: starttime = parseFloatFromBuffer(buffer, fieldStart, j)
+            else: discard
+
+            fieldStart = j + 1
+            inc fieldNum
+            if fieldNum > 19: break
+    statFile.close()
+
+  logHandle.write(" | State: ")
+  logHandle.write(parseState(state))
+
+  # Read status file for memory/threads
+  var statusFile: File
+  if open(statusFile, "/proc/" & pidStr & "/status", fmRead):
+    var line: string
+    while statusFile.readLine(line):
+      if line.startsWith("Threads:"):
+        threads = parseInt(line[8..^1].strip())
+      elif line.startsWith("VmRSS:"):
+        let parts = line[6..^1].strip().split()
+        if parts.len > 0: rss = parseInt(parts[0])
+      elif line.startsWith("VmSize:"):
+        let parts = line[7..^1].strip().split()
+        if parts.len > 0: vsz = parseInt(parts[0])
+    statusFile.close()
+
+  # Read PSS from smaps_rollup
+  var smapsFile: File
+  if open(smapsFile, "/proc/" & pidStr & "/smaps_rollup", fmRead):
+    var line: string
+    while smapsFile.readLine(line):
       if line.startsWith("Pss:"):
-        pssTotal.inc(parseInt(line[4..^1].strip.split()[0]))
-  details.memory_pss = pssTotal
+        let parts = line[4..^1].strip().split()
+        if parts.len > 0:
+          pss = parseInt(parts[0])
+          break
+    smapsFile.close()
 
-  # CPU calculation
-  let utime = rest[11].parseFloat
-  let stime = rest[12].parseFloat
-  let total_time = utime + stime
-  if processUptime > 0:
-    details.cpu_usage = roundTo((total_time / ClockTicks) / processUptime * 100, 2)
+  # Write rest of log line
+  logHandle.write(" | Threads: ")
+  logHandle.write($threads)
+  logHandle.write(" | RSS (MB): ")
+  writeFloat(logHandle, rss.float / 1000.0, 2)
+  logHandle.write(" | VSZ (MB): ")
+  writeFloat(logHandle, vsz.float / 1000.0, 2)
+  logHandle.write(" | PSS (MB): ")
+  writeFloat(logHandle, pss.float / 1000.0, 2)
 
-  return details
+  # Calculate CPU and uptime
+  logHandle.write(" | CPU (%): ")
+  var uptimeFile: File
+  if open(uptimeFile, "/proc/uptime", fmRead):
+    var line: string
+    if uptimeFile.readLine(line):
+      let systemUptime = parseFloat(line.split()[0])
+      let processUptime = max(systemUptime - starttime / ClockTicks, 0.0)
+      let cpuPercent = if processUptime > 0: (utime + stime) / ClockTicks /
+          processUptime * 100.0 else: 0.0
 
-proc findPIDsByName(targetName: string): seq[int] =
-  result = @[]
+      writeFloat(logHandle, cpuPercent, 2)
+      logHandle.write(" | Uptime (sec): ")
+      writeFloat(logHandle, processUptime, 2)
+    uptimeFile.close()
+  else:
+    logHandle.write("0.0 | Uptime (sec): 0.0")
+
+  logHandle.write(" | Last Checked: ")
+  logHandle.write(now().utc.format("yyyy-MM-dd'T'HH:mm:ss'.'fffzzz"))
+  logHandle.write("\n")
+
+# ==============================================================================
+# Main loop - streaming approach
+# ==============================================================================
+
+proc processMonitor(procName: string, checkInterval: float) =
+  ## Find and log process by name
+  var found = false
+
   for entry in walkDir("/proc"):
-    if entry.kind == pcDir:
-      let pidStr = extractFilename(entry.path)
-      try: discard pidStr.parseInt
-      except ValueError: continue
-      let pid = pidStr.parseInt
-      let statPath = "/proc/" & pidStr & "/stat"
-      if fileExists(statPath):
-        let line = readFile(statPath)
-        let sIdx = line.find('(') + 1
-        let eIdx = line.find(')', sIdx)
-        if sIdx > 0 and eIdx > sIdx:
-          if line[sIdx..<eIdx] == targetName:
-            result.add(pid)
+    if entry.kind != pcDir: continue
 
-# ------------------------------
-# Logging System
-# ------------------------------
+    let pidStr = entry.path.extractFilename()
 
-proc rotateLogs(config: AppConfig) =
-  if logHandle != nil: close(logHandle)
-  let lastLog = config.log_path & $config.max_log_files
-  if fileExists(lastLog): removeFile(lastLog)
-  for i in countdown(config.max_log_files - 1, 1):
-    let oldFile = config.log_path & $i
-    if fileExists(oldFile): moveFile(oldFile, config.log_path & $(i+1))
-  if fileExists(config.log_path): moveFile(config.log_path, config.log_path & "1")
+    # Quick numeric check
+    var isNum = true
+    for c in pidStr:
+      if c notin '0'..'9':
+        isNum = false
+        break
+    if not isNum: continue
 
-proc initLogging(config: AppConfig) =
-  createDir(config.log_path.splitPath.head)
-  logHandle = open(config.log_path, fmAppend)
+    # Read just enough of stat to get process name
+    var statFile: File
+    if open(statFile, "/proc/" & pidStr & "/stat", fmRead):
+      var bytesRead = statFile.readChars(buffer, 0, BufferSize-1)
+      if bytesRead > 0:
+        buffer[bytesRead] = '\0'
 
-proc writeProcDetails(config: AppConfig) =
-  let timestamp = now().utc.format("yyyy-MM-dd'T'HH:mm:ss'.'fffzzz")
-  for procName in config.processes:
-    for pid in findPIDsByName(procName):
-      var details = getProcessDetails(pid, config.check_interval)
-      details.last_checked = timestamp
-      writeLine(logHandle, $details)
-  flushFile(logHandle)
-  if getFileSize(config.log_path) > config.max_log_size:
-    rotateLogs(config)
-    logHandle = open(config.log_path, fmAppend)
+        # Extract name between parentheses
+        var nameStart = -1
+        var nameEnd = -1
+        for i in 0..<bytesRead:
+          if buffer[i] == '(' and nameStart < 0:
+            nameStart = i + 1
+          elif buffer[i] == ')':
+            nameEnd = i
 
-# ------------------------------
-# Main Application
-# ------------------------------
+        if nameStart >= 0 and nameEnd > nameStart:
+          # Compare name in-place
+          var matches = true
+          if nameEnd - nameStart == procName.len:
+            for i in 0..<procName.len:
+              if buffer[nameStart + i] != procName[i]:
+                matches = false
+                break
+          else:
+            matches = false
+
+          if matches:
+            found = true
+            statFile.close()
+            logProcess(parseInt(pidStr), procName, checkInterval)
+            continue
+      statFile.close()
+
+  if not found:
+    logHandle.write("Process not found: ")
+    logHandle.write(procName)
+    logHandle.write(" | Last Checked: ")
+    logHandle.write(now().utc.format("yyyy-MM-dd'T'HH:mm:ss'.'fffzzz"))
+    logHandle.write("\n")
+
+# ==============================================================================
+# Config and main
+# ==============================================================================
+
+type Config = tuple[interval: float, processes: seq[string], logPath: string,
+    maxSize: int, maxFiles: int]
+
+proc loadConfig(): Config =
+  result.interval = 300.0
+  result.processes = @["sitecontroller_"]
+  result.logPath = LogPath
+  result.maxSize = 1_048_576
+  result.maxFiles = 5
+
+  if fileExists(ConfigPath):
+    for line in lines(ConfigPath):
+      let trimmed = line.strip()
+      if trimmed.len > 0 and trimmed[0] != '#':
+        let parts = trimmed.split('=', 1)
+        if parts.len == 2:
+          let key = parts[0].strip()
+          let val = parts[1].strip()
+          case key
+          of "check_interval": result.interval = parseFloat(val)
+          of "processes": result.processes = val.split(',').mapIt(it.strip())
+          of "log_path": result.logPath = val
+          of "max_log_size": result.maxSize = parseInt(val)
+          of "max_log_files": result.maxFiles = parseInt(val)
+
+proc rotateIfNeeded(config: Config) =
+  try:
+    if getFileSize(config.logPath) > config.maxSize:
+      logHandle.close()
+
+      # Simple rotation
+      if fileExists(config.logPath & $config.maxFiles):
+        removeFile(config.logPath & $config.maxFiles)
+
+      for i in countdown(config.maxFiles - 1, 1):
+        let old = config.logPath & $i
+        if fileExists(old):
+          moveFile(old, config.logPath & $(i + 1))
+
+      if fileExists(config.logPath):
+        moveFile(config.logPath, config.logPath & "1")
+
+      logHandle = open(config.logPath, fmAppend)
+  except:
+    discard
 
 when isMainModule:
-  var config = loadConfig(ConfigPath)
-  initLogging(config)
+  let config = loadConfig()
+  createDir(splitPath(config.logPath).head)
+  logHandle = open(config.logPath, fmAppend)
+
   while true:
-    let startTime = epochTime()
-    writeProcDetails(config)
-    let elapsed = epochTime() - startTime
-    let sleepTime = max(config.check_interval - elapsed, 0.0) * 1000
-    sleep sleepTime.int
+    let start = epochTime()
+
+    for procName in config.processes:
+      processMonitor(procName, config.interval)
+
+    flushFile(logHandle)
+    rotateIfNeeded(config)
+
+    let elapsed = epochTime() - start
+    let sleepMs = int(max(config.interval - elapsed, 0.0) * 1000)
+    sleep(sleepMs)
