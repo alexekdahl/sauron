@@ -91,7 +91,7 @@ proc `$`(ps: ProcessState): string =
   else: "Unknown"
 
 proc roundTo(num: float, precision: int): float =
-  let factor = 10.0^precision.float
+  let factor = pow(10.0, precision.toFloat)
   (num * factor).round / factor
 
 proc `$`(pd: ProcessDetails): string =
